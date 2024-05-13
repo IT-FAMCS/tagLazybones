@@ -1,103 +1,113 @@
-import telebot
+import pyrogram
 import datetime
 import time
 
-TOKEN = ''
-GROUP_CHAT_ID = ''
-bot = telebot.TeleBot(TOKEN)
+app = pyrogram.Client("my_account")
+
+GROUP_CHAT_ID = "chat_id_here"
+
+
+@app.on_message(pyrogram.filters.command("start"))
+def start_command(client, message):
+    message.reply_text("Привет! Я бот, который будет проверять, что все участники группы проголосовали в опросе")
 
 
 class PollManager:
     def __init__(self):
-        self.people = []
-        self.voted_people = []
-        self.poll_id = None
+        self.poll_message = None
+        self.poll_voters = []
+        self.members = []
 
     def create_poll(self, question, options):
-        poll = bot.send_poll(GROUP_CHAT_ID, question, options)
-        self.poll_id = poll.poll.id
+        self.poll_message = app.send_poll(
+            chat_id=GROUP_CHAT_ID,
+            question=question,
+            options=options
+        )
 
-    def get_all_users(self):
-        members = bot.get_chat_members(GROUP_CHAT_ID)
-        for member in members:
-            self.people.append(member.username)
+    def get_poll_voters(self):
+        if self.poll_message is not None:
+            poll_message_id = self.poll_message.message_id
+            self.poll_voters = app.get_poll_voters(chat_id=GROUP_CHAT_ID, message_id=poll_message_id)
 
-    def get_poll_answers(self):
-        if self.poll_id is not None:
-            poll_answers = bot.get_poll_answer(self.poll_id)
-            for answer in poll_answers:
-                self.voted_people.append(answer.user.username)
+    def get_members(self):
+        self.members = app.get_chat_members(GROUP_CHAT_ID)
 
-    def print_non_voters(self):
-        non_voters = [person for person in self.people if person not in self.voted_people]
-        for non_voter in non_voters:
-            bot.send_message(chat_id=GROUP_CHAT_ID, text=f'{non_voter}')
-        bot.send_message(chat_id=GROUP_CHAT_ID, text='Люди, которые не проголосовали, были отправлены в чате')
+    def check_voters(self):
+        self.get_poll_voters()
+        self.get_members()
+
+        member_ids = [member.user.id for member in self.members]
+        voter_ids = [voter.user.id for voter in self.poll_voters]
+
+        for member_id in member_ids:
+            if member_id not in voter_ids:
+                app.send_message(
+                    chat_id=GROUP_CHAT_ID,
+                    text=f"Пользователь {member_id} не проголосовал в опросе",
+                )
 
 
-class ReactionManager:
+class ReactionsManager:
     def __init__(self):
-        self.people = []
-        self.reacted_people = []
         self.message = None
+        self.reactions = []
+        self.members = []
 
-    def get_all_users(self):
-        members = bot.get_chat_members(GROUP_CHAT_ID)
-        for member in members:
-            self.people.append(member.user.id)
-
-    def create_message(self, message):
-        message = bot.send_message(GROUP_CHAT_ID, message)
-        self.message = message
+    def create_message(self, text):
+        self.message = app.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=text
+        )
 
     def get_reactions(self):
-        for reaction in message.reactions:
-            self.reacted_people.append(reaction.user.id)
+        if self.message is not None:
+            message_id = self.message.message_id
+            self.reactions = app.get_reactions(GROUP_CHAT_ID, message_id)
 
-    def print_non_reactors(self):
-        non_reactors = [person for person in self.people if person not in self.reacted_people]
-        for non_reactor in non_reactors:
-            bot.send_message(chat_id=GROUP_CHAT_ID, text=f'{non_reactor}')
-        bot.send_message(chat_id=GROUP_CHAT_ID, text='Люди, которые не поставили реакцию, были отправлены в чате')
+    def get_members(self):
+        self.members = app.get_chat_members(GROUP_CHAT_ID)
+
+    def check_reactions(self):
+        self.get_reactions()
+        self.get_members()
+
+        member_ids = [member.user.id for member in self.members]
+        reaction_ids = [reaction.user.id for reaction in self.reactions]
+
+        for member_id in member_ids:
+            if member_id not in reaction_ids:
+                app.send_message(
+                    chat_id=GROUP_CHAT_ID,
+                    text=f"Пользователь {member_id} не поставил реакцию",
+                )
 
 
-reaction_manager = ReactionManager()
 poll_manager = PollManager()
+reactions_manager = ReactionsManager()
 
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.send_message(message.chat.id, f'Здравствуйте, я бот, который поможет вам узнать, кто не проголосовал в опросе')
+@app.on_message(pyrogram.filters.command("create_poll"))
+def create_poll_command(client, message):
+    poll_manager.create_poll("Вопрос", ["Ответ 1", "Ответ 2", "Ответ 3"])
+    message.reply_text("Опрос создан")
 
 
-@bot.message_handler(commands=['create_poll'])
-def create_poll(message):
-    question = message.text.split()[1]
-    options = message.text.split()[2:]
-    poll_manager.create_poll(question, options)
-
-
-@bot.message_handler(commands=['create_message'])
-def create_message(message):
-    message_text = message.text.split()[1]
-    reaction_manager.create_message(message_text)
+@app.on_message(pyrogram.filters.command("create_message"))
+def create_message_command(client, message):
+    reactions_manager.create_message("Текст сообщения")
+    message.reply_text("Сообщение создано")
 
 
 def main():
     while True:
         now = datetime.datetime.now()
         if now.hour == 14 and now.minute == 15:
-            poll_manager.get_poll_answers()
-            poll_manager.print_non_voters()
-
-            reaction_manager.get_reactions()
-            reaction_manager.print_non_reactors()
-
+            poll_manager.check_voters()
+            reactions_manager.check_reactions()
             time.sleep(86400 - now.second)
 
 
 if __name__ == '__main__':
     main()
-
-
-bot.polling(none_stop=True, interval=0)
+    app.run()
