@@ -51,7 +51,7 @@ class ReactionManager:
         self.message = message
 
     def get_reactions(self):
-        for reaction in message.reactions:
+        for reaction in self.message.reactions:
             self.reacted_people.append(reaction.user.id)
 
     def print_non_reactors(self):
